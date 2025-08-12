@@ -1,0 +1,31 @@
+kafka:
+  bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  schema-registry-url: ${SCHEMA_REGISTRY_URL:http://90.156.226.5:8081}
+
+  consumers:
+    common:
+      auto-offset-reset: earliest
+      auto-commit: true
+
+    strings:
+      topic: demo.strings
+      group-id: demo.strings.group
+
+    json:
+      topic: demo.orders.json
+      group-id: demo.orders.json.group
+
+    proto:
+      topic: demo.person.proto
+      group-id: demo.person.proto.group
+
+  producers:
+    strings:
+      topic: demo.strings
+    json:
+      topic: demo.orders.json
+    proto:
+      topic: demo.person.proto
+
+server:
+  port: 8080

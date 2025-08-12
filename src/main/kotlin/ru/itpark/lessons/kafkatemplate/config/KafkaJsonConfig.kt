@@ -13,52 +13,54 @@ import org.springframework.kafka.support.serializer.JsonSerializer
 import ru.itpark.lessons.kafkatemplate.model.Order
 
 @Configuration
-class KafkaJsonConfig {
-    private val bootstrapServers: String =
-        System.getenv("KAFKA_BOOTSTRAP_SERVERS") ?: "localhost:9092"
-
+class KafkaJsonConfig(
+    private val app: KafkaAppProperties,
+) {
+    // ---------- PRODUCER (JSON) ----------
     @Bean
     fun jsonProducerFactory(): ProducerFactory<String, Order> {
-        val props =
-            mapOf(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+        val p =
+            mutableMapOf<String, Any>(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to app.bootstrapServers,
                 ProducerConfig.ACKS_CONFIG to "all",
-                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
-                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to JsonSerializer::class.java,
                 ProducerConfig.LINGER_MS_CONFIG to 5,
                 ProducerConfig.BATCH_SIZE_CONFIG to 32 * 1024,
                 ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG to true,
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to JsonSerializer::class.java,
             )
-        return DefaultKafkaProducerFactory(props)
+        app.schemaRegistryUrl?.let { p["schema.registry.url"] = it }
+        return DefaultKafkaProducerFactory(p)
     }
 
     @Bean
-    fun jsonKafkaTemplate(): KafkaTemplate<String, Order> = KafkaTemplate(jsonProducerFactory())
+    fun jsonKafkaTemplate(): KafkaTemplate<String, Order> =
+        KafkaTemplate(jsonProducerFactory()).apply {
+            defaultTopic = app.producers.json.topic
+        }
 
-    // ---------- CONSUMER (JSON) ----------
     @Bean
     fun jsonConsumerFactory(): ConsumerFactory<String, Order> {
-        val deserializer =
-            JsonDeserializer(Order::class.java).apply {
-                addTrustedPackages("*") // демо-режим, в проде — ограничить пакетами
-            }
-        val props =
-            mapOf(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
-                ConsumerConfig.GROUP_ID_CONFIG to "demo-json-group",
+        val c =
+            mutableMapOf<String, Any>(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to app.bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG to
+                    app.consumers.json.groupId
+                        .ifBlank { "demo-json-group" },
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to app.consumers.common.autoOffsetReset,
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to app.consumers.common.autoCommit,
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG to StringDeserializer::class.java,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to deserializer.javaClass,
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest",
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to false,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to JsonDeserializer::class.java,
+                JsonDeserializer.TRUSTED_PACKAGES to "ru.itpark.lessons.kafkatemplate.*",
             )
-        return DefaultKafkaConsumerFactory(props, StringDeserializer(), deserializer)
+        app.schemaRegistryUrl?.let { c["schema.registry.url"] = it }
+        return DefaultKafkaConsumerFactory(c)
     }
 
-    @Bean
-    fun jsonKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, Order> {
-        val factory = ConcurrentKafkaListenerContainerFactory<String, Order>()
-        factory.consumerFactory = jsonConsumerFactory()
-        factory.setConcurrency(3)
-        return factory
-    }
+    @Bean(name = ["jsonKafkaListenerContainerFactory"])
+    fun jsonKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, Order> =
+        ConcurrentKafkaListenerContainerFactory<String, Order>().apply {
+            consumerFactory = jsonConsumerFactory()
+            setConcurrency(3)
+        }
 }

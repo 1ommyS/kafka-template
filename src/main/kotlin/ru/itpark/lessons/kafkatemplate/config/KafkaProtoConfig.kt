@@ -13,49 +13,54 @@ import ru.itpark.lessons.kafkatemplate.serializers.PersonDeserializer
 import ru.itpark.lessons.kafkatemplate.serializers.PersonSerializer
 
 @Configuration
-class KafkaProtoConfig {
-    private val bootstrapServers: String =
-        System.getenv("KAFKA_BOOTSTRAP_SERVERS") ?: "localhost:9092"
-
+class KafkaProtoConfig(
+    private val app: KafkaAppProperties,
+) {
     // ---------- PRODUCER (PROTO) ----------
     @Bean
     fun protoProducerFactory(): ProducerFactory<String, Person> {
-        val props =
-            mapOf(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+        val p =
+            mutableMapOf<String, Any>(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to app.bootstrapServers,
                 ProducerConfig.ACKS_CONFIG to "all",
-                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
-                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to PersonSerializer::class.java,
                 ProducerConfig.LINGER_MS_CONFIG to 5,
                 ProducerConfig.BATCH_SIZE_CONFIG to 32 * 1024,
                 ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG to true,
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to PersonSerializer::class.java,
             )
-        return DefaultKafkaProducerFactory(props)
+        app.schemaRegistryUrl?.let { p["schema.registry.url"] = it }
+        return DefaultKafkaProducerFactory(p)
     }
 
     @Bean
-    fun protoKafkaTemplate(): KafkaTemplate<String, Person> = KafkaTemplate(protoProducerFactory())
+    fun protoKafkaTemplate(): KafkaTemplate<String, Person> =
+        KafkaTemplate(protoProducerFactory()).apply {
+            defaultTopic = app.producers.proto.topic
+        }
 
     // ---------- CONSUMER (PROTO) ----------
     @Bean
     fun protoConsumerFactory(): ConsumerFactory<String, Person> {
-        val props =
-            mapOf(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
-                ConsumerConfig.GROUP_ID_CONFIG to "demo-proto-group",
+        val c =
+            mutableMapOf<String, Any>(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to app.bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG to
+                    app.consumers.proto.groupId
+                        .ifBlank { "demo-proto-group" },
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to app.consumers.common.autoOffsetReset,
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to app.consumers.common.autoCommit,
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG to StringDeserializer::class.java,
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG to PersonDeserializer::class.java,
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest",
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to false,
             )
-        return DefaultKafkaConsumerFactory(props, StringDeserializer(), PersonDeserializer())
+        app.schemaRegistryUrl?.let { c["schema.registry.url"] = it }
+        return DefaultKafkaConsumerFactory(c, StringDeserializer(), PersonDeserializer())
     }
 
-    @Bean
-    fun protoKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, Person> {
-        val factory = ConcurrentKafkaListenerContainerFactory<String, Person>()
-        factory.consumerFactory = protoConsumerFactory()
-        factory.setConcurrency(3)
-        return factory
-    }
+    @Bean(name = ["protoKafkaListenerContainerFactory"])
+    fun protoKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, Person> =
+        ConcurrentKafkaListenerContainerFactory<String, Person>().apply {
+            consumerFactory = protoConsumerFactory()
+            setConcurrency(3)
+        }
 }
