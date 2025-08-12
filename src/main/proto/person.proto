@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package com.example.kafkademo.proto;
+
+option java_package = "com.example.kafkademo.proto";
+option java_multiple_files = true;
+
+message Person {
+  string id = 1;
+  string name = 2;
+  int32  age = 3;
+  string email = 4;
+}
